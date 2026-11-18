@@ -1,0 +1,350 @@
+{
+  "datasets": [
+    {
+      "name": "trips_by_rain_bucket",
+      "displayName": "Trips by Rain Bucket",
+      "config": {
+        "version": "1.1",
+        "source": "workspace.taxi_lakehouse.gold_demand_by_zone_hour",
+        "dimensions": [
+          {
+            "name": "rain_bucket",
+            "expr": "CASE\n  WHEN precip_mm IS NULL THEN 'Unknown'\n  WHEN precip_mm = 0 THEN '0 mm (Dry)'\n  WHEN precip_mm < 2.5 THEN '0-2.5 mm (Light)'\n  WHEN precip_mm < 7.6 THEN '2.5-7.6 mm (Moderate)'\n  ELSE '7.6+ mm (Heavy)'\nEND"
+          }
+        ],
+        "measures": [
+          {
+            "name": "total_trips",
+            "expr": "SUM(trips)"
+          }
+        ]
+      }
+    },
+    {
+      "name": "hourly_trips_weather",
+      "displayName": "Hourly Trips vs Precipitation",
+      "config": {
+        "version": "1.1",
+        "source": "workspace.taxi_lakehouse.gold_demand_by_zone_hour",
+        "dimensions": [
+          {
+            "name": "hour_ts",
+            "expr": "hour_ts"
+          }
+        ],
+        "measures": [
+          {
+            "name": "total_trips",
+            "expr": "SUM(trips)"
+          },
+          {
+            "name": "avg_precipitation_mm",
+            "expr": "AVG(precip_mm)"
+          }
+        ]
+      }
+    },
+    {
+      "name": "top_zones_rain_vs_dry",
+      "displayName": "Top Pickup Zones: Heavy Rain vs Dry",
+      "config": {
+        "version": "1.1",
+        "source": "WITH zone_hour AS (\n  SELECT\n    pickup_zone,\n    CASE\n      WHEN precip_mm >= 7.6 THEN 'Heavy Rain'\n      WHEN precip_mm = 0 THEN 'Dry'\n    END AS rain_condition,\n    trips\n  FROM workspace.taxi_lakehouse.gold_demand_by_zone_hour\n), zone_totals AS (\n  SELECT\n    pickup_zone,\n    SUM(CASE WHEN rain_condition = 'Heavy Rain' THEN trips ELSE 0 END) AS heavy_trips,\n    SUM(CASE WHEN rain_condition = 'Dry' THEN trips ELSE 0 END) AS dry_trips\n  FROM zone_hour\n  GROUP BY pickup_zone\n), ranked AS (\n  SELECT\n    pickup_zone,\n    heavy_trips,\n    dry_trips,\n    ROW_NUMBER() OVER (ORDER BY heavy_trips DESC, dry_trips DESC) AS rn\n  FROM zone_totals\n) SELECT pickup_zone, 'Heavy Rain' AS rain_condition, heavy_trips AS trips FROM ranked WHERE rn <= 10 UNION ALL SELECT pickup_zone, 'Dry' AS rain_condition, dry_trips AS trips FROM ranked WHERE rn <= 10",
+        "dimensions": [
+          {
+            "name": "pickup_zone",
+            "expr": "pickup_zone"
+          },
+          {
+            "name": "rain_condition",
+            "expr": "rain_condition"
+          }
+        ],
+        "measures": [
+          {
+            "name": "total_trips",
+            "expr": "SUM(trips)"
+          }
+        ]
+      }
+    }
+  ],
+  "pages": [
+    {
+      "name": "c0c2ea9e",
+      "displayName": "Untitled page",
+      "layout": [
+        {
+          "widget": {
+            "name": "trips_by_rain_bucket",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "trips_by_rain_bucket",
+                  "fields": [
+                    {
+                      "name": "rain_bucket",
+                      "expression": "`rain_bucket`"
+                    },
+                    {
+                      "name": "measure(total_trips)",
+                      "expression": "MEASURE(`total_trips`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Trips by Rain Bucket",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "rain_bucket",
+                  "displayName": "rain_bucket",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "measure(total_trips)",
+                  "displayName": "total_trips",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "rain_bucket",
+                  "displayName": "rain_bucket",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 5,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "top_zones_rain_vs_dry",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "top_zones_rain_vs_dry",
+                  "fields": [
+                    {
+                      "name": "rain_condition",
+                      "expression": "`rain_condition`"
+                    },
+                    {
+                      "name": "pickup_zone",
+                      "expression": "`pickup_zone`"
+                    },
+                    {
+                      "name": "measure(total_trips)",
+                      "expression": "MEASURE(`total_trips`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Top 10 Pickup Zones: Heavy Rain vs. Dry"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "pickup_zone",
+                  "displayName": "pickup_zone",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "measure(total_trips)",
+                  "displayName": "total_trips",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "rain_condition",
+                  "displayName": "rain_condition",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "hourly_trips_vs_precip",
+            "queries": [
+              {
+                "name": "combo_primary_1",
+                "query": {
+                  "datasetName": "hourly_trips_weather",
+                  "fields": [
+                    {
+                      "name": "hour_ts",
+                      "expression": "`hour_ts`"
+                    },
+                    {
+                      "name": "measure(total_trips)",
+                      "expression": "MEASURE(`total_trips`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "combo_secondary_1",
+                "query": {
+                  "datasetName": "hourly_trips_weather",
+                  "fields": [
+                    {
+                      "name": "hour_ts",
+                      "expression": "`hour_ts`"
+                    },
+                    {
+                      "name": "measure(avg_precipitation_mm)",
+                      "expression": "MEASURE(`avg_precipitation_mm`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Hourly Trips vs. Precipitation"
+              },
+              "version": 2,
+              "widgetType": "combo",
+              "encodings": {
+                "x": {
+                  "fieldName": "hour_ts",
+                  "displayName": "Hour",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "primary": {
+                    "layers": [
+                      {
+                        "encodings": {
+                          "value": {
+                            "fieldName": "measure(total_trips)"
+                          }
+                        },
+                        "visual": "line",
+                        "queryName": "combo_primary_1"
+                      }
+                    ],
+                    "scale": {
+                      "type": "quantitative"
+                    }
+                  },
+                  "secondary": {
+                    "layers": [
+                      {
+                        "encodings": {
+                          "value": {
+                            "fieldName": "measure(avg_precipitation_mm)"
+                          }
+                        },
+                        "visual": "line",
+                        "queryName": "combo_secondary_1"
+                      }
+                    ],
+                    "scale": {
+                      "type": "quantitative"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 0,
+            "width": 7,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "96918c39",
+      "displayName": "Global Filters",
+      "layout": [
+        {
+          "widget": {
+            "name": "e4b8dd14",
+            "spec": {
+              "encodings": {
+                "fields": []
+              },
+              "version": 2,
+              "widgetType": "filter-single-select",
+              "frame": {
+                "showTitle": true
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}

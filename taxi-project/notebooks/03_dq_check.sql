@@ -1,0 +1,45 @@
+-- Databricks notebook source
+-- MAGIC %python
+-- MAGIC from pyspark.sql import functions as F
+-- MAGIC
+-- MAGIC SCHEMA = "workspace.taxi_lakehouse"
+-- MAGIC MAX_FAIL_RATE = 0.10   # fail the job if any single rule fails more than 10% of rows
+-- MAGIC
+-- MAGIC df = spark.sql(f"""
+-- MAGIC WITH latest_update AS (
+-- MAGIC   SELECT origin.update_id AS id
+-- MAGIC   FROM event_log(TABLE({SCHEMA}.silver_trips))
+-- MAGIC   WHERE event_type = 'create_update'
+-- MAGIC   ORDER BY timestamp DESC LIMIT 1
+-- MAGIC ),
+-- MAGIC parsed AS (
+-- MAGIC   SELECT explode(from_json(
+-- MAGIC            details:flow_progress.data_quality.expectations,
+-- MAGIC            'array<struct<name: string, dataset: string, passed_records: int, failed_records: int>>'
+-- MAGIC          )) AS e
+-- MAGIC   FROM event_log(TABLE({SCHEMA}.silver_trips)), latest_update
+-- MAGIC   WHERE event_type = 'flow_progress' AND origin.update_id = latest_update.id
+-- MAGIC )
+-- MAGIC SELECT e.dataset AS dataset,
+-- MAGIC        e.name AS expectation,
+-- MAGIC        SUM(e.passed_records) AS passed_records,
+-- MAGIC        SUM(e.failed_records) AS failed_records
+-- MAGIC FROM parsed
+-- MAGIC GROUP BY e.dataset, e.name
+-- MAGIC """)
+-- MAGIC
+-- MAGIC metrics = (df
+-- MAGIC   .withColumn("fail_rate",
+-- MAGIC       F.when((F.col("passed_records") + F.col("failed_records")) > 0,
+-- MAGIC              F.col("failed_records") / (F.col("passed_records") + F.col("failed_records")))
+-- MAGIC        .otherwise(F.lit(0.0)))
+-- MAGIC   .withColumn("run_ts", F.current_timestamp()))
+-- MAGIC
+-- MAGIC metrics.write.mode("append").saveAsTable(f"{SCHEMA}.dq_metrics_event_log")
+-- MAGIC display(metrics)
+-- MAGIC
+-- MAGIC worst = metrics.agg(F.max("fail_rate")).collect()[0][0] or 0.0
+-- MAGIC print(f"Worst rule fail rate: {worst:.2%}")
+-- MAGIC
+-- MAGIC if worst > MAX_FAIL_RATE:
+-- MAGIC     raise Exception(f"DQ check failed: a rule's fail rate {worst:.2%} exceeds {MAX_FAIL_RATE:.0%}")
